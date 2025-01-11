@@ -11,7 +11,9 @@
   "scripts": {
     "build": "tsc",
     "watch": "tsc -w",
-    "server": "node dist/cli.js",
+    "clear": "rm -rf dist",
+    "preversion": "npm run clear && npm run build",
+    "postversion": "npm publish && git push --follow-tags",
     "test": "vitest --run",
     "test:watch": "vitest"
   },
