@@ -2,10 +2,7 @@ import * as lsp from 'vscode-languageserver/node';
 import {textDocuments} from './textDocuments.js';
 import cp from 'child_process';
 import which from 'which';
-
-function isLua(uri: string, langaugeId?: string | undefined): boolean {
-  return langaugeId === 'lua' || uri.endsWith('.lua');
-}
+import { isExecutable, isLua } from '../common.js';
 
 async function styluaFormat(bin: string, filepath: string, content: string, rangeStart?: number, rangeEnd?: number): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -41,12 +38,28 @@ async function styluaFormat(bin: string, filepath: string, content: string, rang
   });
 }
 
+const STATE = {
+  cwd: process.cwd(),
+  bin: null as string | null,
+};
+
 export async function createConnection(): Promise<lsp.Connection> {
-  const inferredBin = await which('stylua');
+  which('stylua').then((bin) => {
+    // only set bin if it's found and wasn't set by configuration
+    if (bin && !STATE.bin) {
+      STATE.bin = bin;
+    }
+  }).catch(() => {});
+
   const connection = lsp.createConnection(process.stdin, process.stdout);
   textDocuments.listen(connection);
 
-  connection.onInitialize(() => {
+  connection.onInitialize((params) => {
+    if (params.workspaceFolders?.[0]) {
+      const workspaceFolder = params.workspaceFolders[0];
+      const filePath = workspaceFolder.uri.replace('file://', '');
+      STATE.cwd = filePath;
+    }
     return {
 			capabilities: {
 				textDocumentSync: lsp.TextDocumentSyncKind.Incremental,
@@ -57,6 +70,9 @@ export async function createConnection(): Promise<lsp.Connection> {
   })
 
   connection.onDocumentFormatting(async (params) => {
+    if (!STATE.bin) {
+      return null;
+    }
     if (!isLua(params.textDocument.uri)) {
       return null;
     }
@@ -73,7 +89,7 @@ export async function createConnection(): Promise<lsp.Connection> {
     const range = lsp.Range.create(start, end)
 
     try {
-      const formattedText = await styluaFormat(inferredBin, textDocument.uri, originalText)
+      const formattedText = await styluaFormat(STATE.bin as string, textDocument.uri, originalText)
 
       return [lsp.TextEdit.replace(range, formattedText)]
     } catch (e) {
@@ -83,6 +99,9 @@ export async function createConnection(): Promise<lsp.Connection> {
 	})
 
   connection.onDocumentRangeFormatting(async (params) => {
+    if (!STATE.bin) {
+      return null;
+    }
     if (!isLua(params.textDocument.uri)) {
       return null;
     }
@@ -98,7 +117,7 @@ export async function createConnection(): Promise<lsp.Connection> {
     const rangeEnd = textDocument.offsetAt(params.range.end)
 
     try {
-      const formattedText = await styluaFormat(inferredBin, textDocument.uri, originalText, rangeStart, rangeEnd)
+      const formattedText = await styluaFormat(STATE.bin as string, textDocument.uri, originalText, rangeStart, rangeEnd)
 
       const formattedTextRanged = formattedText.slice(
         rangeStart,
@@ -111,6 +130,15 @@ export async function createConnection(): Promise<lsp.Connection> {
       return null
     }
 	})
+
+  connection.onDidChangeConfiguration(async change => {
+    const settings = change.settings;
+    const styluaBinFilePath = settings?.seleneBinFilePath;
+
+    if (typeof styluaBinFilePath === 'string' && await isExecutable(styluaBinFilePath)) {
+      STATE.bin = settings.selene.bin;
+    }
+  })
 
   return connection;
 }

@@ -2,6 +2,7 @@ import * as lsp from 'vscode-languageserver/node';
 import {textDocuments} from './textDocuments.js';
 import cp from 'child_process';
 import which from 'which';
+import { isExecutable, isLua } from '../common.js';
 
 interface SeleneDiagnostic {
   type: string;
@@ -89,9 +90,9 @@ function lint({
             } satisfies lsp.PublishDiagnosticsParams);
           } catch (e) {
             if (`${e}`.includes('JSON')) {
-              connection.console.debug(`*** selene JSON error caught: ${e}, json: ${out}`);
+              connection.console.debug(`selene JSON error caught: ${e}, json: ${out}`);
             } else {
-              connection.console.debug(`*** selene error caught: ${e}`);
+              connection.console.debug(`selene error caught: ${e}`);
             }
             resolve({
               uri: uri,
@@ -99,9 +100,9 @@ function lint({
             } satisfies lsp.PublishDiagnosticsParams);
           }
         }
-        connection.console.debug(`*** selene exited with code ${code}, out: ${out}`);
+        connection.console.debug(`selene exited with code ${code}, out: ${out}`);
       } else {
-        connection.console.debug(`*** selene reset diagnostics ${uri}, code: ${code}`);
+        connection.console.debug(`selene reset diagnostics ${uri}, code: ${code}`);
         // reset diagnostics
         resolve({
           uri: uri,
@@ -112,12 +113,19 @@ function lint({
   });
 }
 
-function isLua(uri: string, langaugeId: string | undefined): boolean {
-  return langaugeId === 'lua' || uri.endsWith('.lua');
-}
+const STATE = {
+  cwd: process.cwd(),
+  bin: null as string | null,
+};
 
 export async function createConnection(): Promise<lsp.Connection> {
-  const inferredBin = await which('selene');
+  which('selene').then((bin) => {
+    // only set bin if it's found and wasn't set by configuration
+    if (bin && !STATE.bin) {
+      STATE.bin = bin;
+    }
+  }).catch(() => {});
+
   const connection = lsp.createConnection(process.stdin, process.stdout);
   const debounceTimers = new Map();
   const debouncedLint = (uri: string, content: string) => {
@@ -131,7 +139,7 @@ export async function createConnection(): Promise<lsp.Connection> {
           uri,
           content,
           connection,
-          bin: inferredBin,
+          bin: STATE.bin as string,
         })
       )
     }, 100));
@@ -139,7 +147,12 @@ export async function createConnection(): Promise<lsp.Connection> {
 
   textDocuments.listen(connection);
 
-  connection.onInitialize(() => {
+  connection.onInitialize((params) => {
+    if (params.workspaceFolders?.[0]) {
+      const workspaceFolder = params.workspaceFolders[0];
+      const filePath = workspaceFolder.uri.replace('file://', '');
+      STATE.cwd = filePath;
+    }
     return {
       capabilities: {
         textDocumentSync: lsp.TextDocumentSyncKind.Incremental,
@@ -148,7 +161,10 @@ export async function createConnection(): Promise<lsp.Connection> {
   })
 
   textDocuments.onDidOpen(event => {
-    connection.console.debug(`*** did open > ${event.document.uri}`);
+    connection.console.debug(`did open > ${event.document.uri}`);
+    if (!STATE.bin) {
+      return;
+    }
     if (!isLua(event.document.uri, event.document.languageId)) {
       return;
     }
@@ -156,7 +172,10 @@ export async function createConnection(): Promise<lsp.Connection> {
   })
 
   textDocuments.onDidChangeContent(event => {
-    connection.console.debug(`*** did change > ${event.document.uri}`);
+    connection.console.debug(`did change > ${event.document.uri}`);
+    if (!STATE.bin) {
+      return;
+    }
     if (!isLua(event.document.uri, event.document.languageId)) {
       return;
     }
@@ -164,24 +183,24 @@ export async function createConnection(): Promise<lsp.Connection> {
   })
 
   textDocuments.onDidSave(event => {
-    connection.console.debug(`*** did save > ${event.document.uri}`);
+    connection.console.debug(`did save > ${event.document.uri}`);
+    if (!STATE.bin) {
+      return;
+    }
     if (!isLua(event.document.uri, event.document.languageId)) {
       return;
     }
     debouncedLint(event.document.uri, event.document.getText());
   })
 
-  // TODO: support settings / changeConfiguration
-  // vscode.workspace.onDidChangeConfiguration((event) => {
-  //     if (
-  //         event.affectsConfiguration("selene.run") ||
-  //         event.affectsConfiguration("selene.idleDelay")
-  //     ) {
-  //         disposable?.dispose()
-  //         disposable = listenToChange()
-  //     }
-  // })
-  //
+  connection.onDidChangeConfiguration(async change => {
+    const settings = change.settings;
+    const seleneBinFilePath = settings?.seleneBinFilePath;
+
+    if (typeof seleneBinFilePath === 'string' && await isExecutable(seleneBinFilePath)) {
+      STATE.bin = settings.selene.bin;
+    }
+  })
 
   return connection;
 }
