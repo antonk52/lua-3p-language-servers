@@ -1,6 +1,6 @@
 {
   "name": "lua-3p-language-servers",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "A collection of 3rd party language servers for selene and stylua",
   "author": "antonk52",
   "license": "MIT",
