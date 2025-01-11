@@ -4,7 +4,7 @@ import cp from 'child_process';
 import which from 'which';
 import { isExecutable, isLua } from '../common.js';
 
-async function styluaFormat(bin: string, filepath: string, content: string, rangeStart?: number, rangeEnd?: number): Promise<string> {
+async function styluaFormat(cwd: string, bin: string, filepath: string, content: string, rangeStart?: number, rangeEnd?: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const args = ['--search-parent-directories', '--stdin-filepath', filepath];
     if (rangeStart != null && rangeEnd != null) {
@@ -14,6 +14,7 @@ async function styluaFormat(bin: string, filepath: string, content: string, rang
 
     const child = cp.spawn(bin, args, {
       stdio: ['pipe', 'pipe', 'inherit'],
+      cwd,
     });
 
     let output = '';
@@ -89,7 +90,7 @@ export async function createConnection(): Promise<lsp.Connection> {
     const range = lsp.Range.create(start, end)
 
     try {
-      const formattedText = await styluaFormat(STATE.bin as string, textDocument.uri, originalText)
+      const formattedText = await styluaFormat(STATE.cwd, STATE.bin, textDocument.uri, originalText)
 
       return [lsp.TextEdit.replace(range, formattedText)]
     } catch (e) {
@@ -117,7 +118,7 @@ export async function createConnection(): Promise<lsp.Connection> {
     const rangeEnd = textDocument.offsetAt(params.range.end)
 
     try {
-      const formattedText = await styluaFormat(STATE.bin as string, textDocument.uri, originalText, rangeStart, rangeEnd)
+      const formattedText = await styluaFormat(STATE.cwd, STATE.bin, textDocument.uri, originalText, rangeStart, rangeEnd)
 
       const formattedTextRanged = formattedText.slice(
         rangeStart,

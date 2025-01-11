@@ -26,11 +26,13 @@ interface SeleneDiagnostic {
 }
 
 function lint({
+  cwd,
   bin,
   uri,
   content,
   connection,
 }: {
+  cwd: string;
   bin: string;
   uri: string;
   content: string;
@@ -41,6 +43,7 @@ function lint({
 
     const child = cp.spawn(bin, args, {
       stdio: ['pipe', 'pipe', 'inherit'],
+      cwd,
     });
 
     let out = '';
@@ -136,6 +139,7 @@ export async function createConnection(): Promise<lsp.Connection> {
       debounceTimers.delete(uri);
       connection.sendDiagnostics(
         await lint({
+          cwd: STATE.cwd,
           uri,
           content,
           connection,
