@@ -1,5 +1,5 @@
 import * as lsp from 'vscode-languageserver/node';
-import {textDocuments} from './textDocuments.js';
+import { textDocuments } from './textDocuments.js';
 import cp from 'child_process';
 import which from 'which';
 import { isExecutable, isLua } from '../common.js';
@@ -50,7 +50,7 @@ export async function createConnection(): Promise<lsp.Connection> {
     if (bin && !STATE.bin) {
       STATE.bin = bin;
     }
-  }).catch(() => {});
+  }).catch(() => { });
 
   const connection = lsp.createConnection(process.stdin, process.stdout);
   textDocuments.listen(connection);
@@ -62,12 +62,12 @@ export async function createConnection(): Promise<lsp.Connection> {
       STATE.cwd = filePath;
     }
     return {
-			capabilities: {
-				textDocumentSync: lsp.TextDocumentSyncKind.Incremental,
-				documentFormattingProvider: true,
-				documentRangeFormattingProvider: true,
-			},
-		}
+      capabilities: {
+        textDocumentSync: lsp.TextDocumentSyncKind.Incremental,
+        documentFormattingProvider: true,
+        documentRangeFormattingProvider: true,
+      },
+    }
   })
 
   connection.onDocumentFormatting(async (params) => {
@@ -97,7 +97,7 @@ export async function createConnection(): Promise<lsp.Connection> {
       connection.console.error(`stylua format error: ${e}`)
       return null
     }
-	})
+  })
 
   connection.onDocumentRangeFormatting(async (params) => {
     if (!STATE.bin) {
@@ -130,7 +130,7 @@ export async function createConnection(): Promise<lsp.Connection> {
       connection.console.error(`stylua format error: ${e}`)
       return null
     }
-	})
+  })
 
   connection.onDidChangeConfiguration(async change => {
     const settings = change.settings;
