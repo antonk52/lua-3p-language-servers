@@ -1,12 +1,51 @@
 import * as lsp from 'vscode-languageserver/node';
-import {textDocuments} from './textDocuments.js';
+import { textDocuments } from './textDocuments.js';
 import cp from 'child_process';
 import which from 'which';
 import { isExecutable, isLua } from '../common.js';
 
+interface StyluaOutput {
+  file: "stdin",
+  mismatches: Diff[],
+}
+
+interface Diff {
+  expected: string,
+  expected_end_line: number,
+  expected_start_line: number,
+  original: string,
+  original_end_line: number,
+  original_start_line: number,
+}
+
+function diff_to_text_edit(diff: Diff): lsp.TextEdit {
+  if (diff.original == '') {
+    return lsp.TextEdit.insert(lsp.Position.create(diff.expected_start_line, 0), diff.expected)
+  }
+
+  const start = lsp.Position.create(diff.original_start_line, 0)
+  // NOTE: `lsp.Range` end is exclusive, `original_end_line` inclusive
+  const endExclusive = lsp.Position.create(diff.original_end_line + 1, 0)
+  const range = lsp.Range.create(start, endExclusive)
+
+  if (diff.expected == '') {
+    return lsp.TextEdit.del(range)
+  } else {
+    return lsp.TextEdit.replace(
+      range,
+      diff.expected
+    )
+  }
+}
+
+function outputToTextEdits(styluaOutput: string): lsp.TextEdit[] {
+  let out: StyluaOutput = JSON.parse(styluaOutput);
+  return out.mismatches.map(diff_to_text_edit)
+}
+
 async function styluaFormat(cwd: string, bin: string, filepath: string, content: string, rangeStart?: number, rangeEnd?: number): Promise<string> {
   return new Promise((resolve, reject) => {
-    const args = ['--search-parent-directories', '--stdin-filepath', filepath];
+    const args = ['--search-parent-directories', '--check', '--output-format=JSON', '--stdin-filepath', filepath];
     if (rangeStart != null && rangeEnd != null) {
       args.push('--range-start', rangeStart.toString(), '--range-end', rangeEnd.toString());
     }
@@ -27,10 +66,15 @@ async function styluaFormat(cwd: string, bin: string, filepath: string, content:
     });
 
     child.on('exit', (code) => {
-      if (code === 0) {
-        resolve(output);
-      } else {
-        reject(`stylua exited with code ${code}`);
+      switch (code) {
+        case 0:
+          resolve(JSON.stringify([]))
+          break
+        case 1:
+          resolve(output)
+          break
+        default:
+          reject(`stylua exited with code ${code}`);
       }
     });
 
@@ -50,7 +94,7 @@ export async function createConnection(): Promise<lsp.Connection> {
     if (bin && !STATE.bin) {
       STATE.bin = bin;
     }
-  }).catch(() => {});
+  }).catch(() => { });
 
   const connection = lsp.createConnection(process.stdin, process.stdout);
   textDocuments.listen(connection);
@@ -62,12 +106,12 @@ export async function createConnection(): Promise<lsp.Connection> {
       STATE.cwd = filePath;
     }
     return {
-			capabilities: {
-				textDocumentSync: lsp.TextDocumentSyncKind.Incremental,
-				documentFormattingProvider: true,
-				documentRangeFormattingProvider: true,
-			},
-		}
+      capabilities: {
+        textDocumentSync: lsp.TextDocumentSyncKind.Incremental,
+        documentFormattingProvider: true,
+        documentRangeFormattingProvider: true,
+      },
+    }
   })
 
   connection.onDocumentFormatting(async (params) => {
@@ -85,19 +129,15 @@ export async function createConnection(): Promise<lsp.Connection> {
 
     const originalText = textDocument.getText()
 
-    const start = { line: 0, character: 0 }
-    const end = textDocument.positionAt(originalText.length)
-    const range = lsp.Range.create(start, end)
-
     try {
-      const formattedText = await styluaFormat(STATE.cwd, STATE.bin, textDocument.uri, originalText)
+      const output = await styluaFormat(STATE.cwd, STATE.bin, textDocument.uri, originalText)
 
-      return [lsp.TextEdit.replace(range, formattedText)]
+      return outputToTextEdits(output)
     } catch (e) {
       connection.console.error(`stylua format error: ${e}`)
       return null
     }
-	})
+  })
 
   connection.onDocumentRangeFormatting(async (params) => {
     if (!STATE.bin) {
@@ -118,19 +158,13 @@ export async function createConnection(): Promise<lsp.Connection> {
     const rangeEnd = textDocument.offsetAt(params.range.end)
 
     try {
-      const formattedText = await styluaFormat(STATE.cwd, STATE.bin, textDocument.uri, originalText, rangeStart, rangeEnd)
-
-      const formattedTextRanged = formattedText.slice(
-        rangeStart,
-        rangeEnd + formattedText.length - originalText.length,
-      )
-
-      return [lsp.TextEdit.replace(params.range, formattedTextRanged)]
+      const output = await styluaFormat(STATE.cwd, STATE.bin, textDocument.uri, originalText, rangeStart, rangeEnd)
+      return outputToTextEdits(output)
     } catch (e) {
       connection.console.error(`stylua format error: ${e}`)
       return null
     }
-	})
+  })
 
   connection.onDidChangeConfiguration(async change => {
     const settings = change.settings;
