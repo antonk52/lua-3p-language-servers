@@ -18,7 +18,7 @@ interface Diff {
   original_start_line: number,
 }
 
-function diff_to_text_edit(diff: Diff): lsp.TextEdit {
+function diffToTextEdit(diff: Diff): lsp.TextEdit {
   if (diff.original == '') {
     return lsp.TextEdit.insert(lsp.Position.create(diff.expected_start_line, 0), diff.expected)
   }
@@ -38,12 +38,11 @@ function diff_to_text_edit(diff: Diff): lsp.TextEdit {
   }
 }
 
-function outputToTextEdits(styluaOutput: string): lsp.TextEdit[] {
-  let out: StyluaOutput = JSON.parse(styluaOutput);
-  return out.mismatches.map(diff_to_text_edit)
+function outputToTextEdits(styluaOutput: StyluaOutput): lsp.TextEdit[] {
+  return styluaOutput.mismatches.map(diffToTextEdit)
 }
 
-async function styluaFormat(cwd: string, bin: string, filepath: string, content: string, rangeStart?: number, rangeEnd?: number): Promise<string> {
+async function styluaFormat(cwd: string, bin: string, filepath: string, content: string, rangeStart?: number, rangeEnd?: number): Promise<StyluaOutput> {
   return new Promise((resolve, reject) => {
     const args = ['--search-parent-directories', '--check', '--output-format=JSON', '--stdin-filepath', filepath];
     if (rangeStart != null && rangeEnd != null) {
@@ -68,10 +67,10 @@ async function styluaFormat(cwd: string, bin: string, filepath: string, content:
     child.on('exit', (code) => {
       switch (code) {
         case 0:
-          resolve(JSON.stringify([]))
+          resolve({ file: "stdin", mismatches: [] })
           break
         case 1:
-          resolve(output)
+          resolve(JSON.parse(output))
           break
         default:
           reject(`stylua exited with code ${code}`);
@@ -131,7 +130,6 @@ export async function createConnection(): Promise<lsp.Connection> {
 
     try {
       const output = await styluaFormat(STATE.cwd, STATE.bin, textDocument.uri, originalText)
-
       return outputToTextEdits(output)
     } catch (e) {
       connection.console.error(`stylua format error: ${e}`)
