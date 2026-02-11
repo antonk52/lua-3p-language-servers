@@ -15,8 +15,7 @@
     "preversion": "npm run clear && npm run build",
     "postversion": "npm publish && git push --follow-tags",
     "test": "vitest --run",
-    "test:watch": "vitest",
-    "outdated": "bun outdated"
+    "test:watch": "vitest"
   },
   "keywords": [
     "language server",
